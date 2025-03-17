@@ -1,0 +1,18 @@
+{namespace classes}
+
+{template .generateTaskClasses}
+  {foreach $class in $classes}
+    (defclass {$class.name} ()
+      ({foreach $slot in $class.slots}
+        ({$slot.name} :initarg :{$slot.name} :accessor {$slot.name} :initform {$slot.initform})
+      {/foreach}))
+    
+    (defmethod process ((task {$class.name}))
+      (format t "Processing ~A with ~A=~A~%"
+              "{$class.name}"
+              "{$class.keySlot}"
+              ({$class.keySlot} task))
+      (sleep ({$class.durationSlot} task))
+      t)
+  {/foreach}
+{/template}
