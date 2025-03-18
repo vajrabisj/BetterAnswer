@@ -1,0 +1,67 @@
+(ns example
+  (:require [libpython-clj.require :refer [require-python]]
+            [libpython-clj.python :as py]
+            [uncomplicate.neanderthal.core :as nc]
+            [uncomplicate.neanderthal.native :as nn]
+            [clj-http.client :as http]))
+
+;; 初始化 Python 环境
+(py/initialize!)
+
+;; 导入 Python 库
+(require-python '[pdfplumber :as pdf])
+(require-python '[sentence_transformers :as st])
+
+;; 1. 提取 PDF 文本
+(defn extract-text-from-pdf [filepath]
+  (with-open [pdf-file (pdf/open filepath)]
+    (reduce str (map #(py/$a % extract_text) (.pages pdf-file)))))
+
+;; 2. 文本分块
+(defn chunk-text [text chunk-size]
+  (->> (clojure.string/split text #"\n\n+") ; 按段落分块
+       (mapcat #(clojure.string/split % #"[。！？]")) ; 按句子分块
+       (mapcat #(partition-all chunk-size %)))) ; 按固定长度分块
+
+;; 3. 生成 embedding
+(def model (st/SentenceTransformer "paraphrase-multilingual-MiniLM-L12-v2"))
+(defn generate-embeddings [text-chunks]
+  (py/$a model encode text-chunks))
+
+;; 4. 检索最相似的文本块
+(defn cosine-similarity [a b]
+  (/ (nc/dot a b)
+     (* (nc/nrm2 a) (nc/nrm2 b))))
+
+(defn search-similar [embeddings query-embedding k]
+  (let [query-vector (nn/dv query-embedding)
+        embeddings-matrix (nn/dge (count (first embeddings)) (count embeddings)
+                                 (flatten (apply mapv vector embeddings)))
+        similarities (map #(cosine-similarity query-vector (nc/col embeddings-matrix %))
+                          (range (nc/ncol embeddings-matrix)))]
+    (take k (sort-by val > (map-indexed vector similarities)))))
+
+;; 5. 调用 LLM 生成回答
+(defn query-llm [prompt context]
+  (let [response (http/post "https://api.openai.com/v1/completions"
+                            {:headers {"Authorization" "Bearer YOUR_API_KEY"}
+                             :content-type :json
+                             :body (json/write-str {:model "gpt-3.5-turbo"
+                                                   :prompt (str context "\n\n" prompt)
+                                                   :max_tokens 150})})]
+    (-> response :body (json/read-str :key-fn keyword) :choices first :text)))
+
+(defn generate-final-answer [query rag-results]
+  (let [context (clojure.string/join "\n" rag-results)
+        prompt (str "根据以下上下文，回答用户的问题：\n" context "\n\n用户问题：" query)]
+    (query-llm prompt context)))
+
+;; 完整 RAG + LLM 工作流
+(defn rag-llm-pipeline [filepath query chunk-size k]
+  (let [text (extract-text-from-pdf filepath)
+        chunks (chunk-text text chunk-size)
+        embeddings (generate-embeddings chunks)
+        query-embedding (first (generate-embeddings [query]))
+        similar-indices (search-similar embeddings query-embedding k)
+        rag-results (map #(nth chunks %) similar-indices)]
+    (generate-final-answer query rag-results)))

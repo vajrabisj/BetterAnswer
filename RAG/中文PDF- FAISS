@@ -8,23 +8,21 @@
 
 ;; 导入 Python 库
 (require-python '[pdfplumber :as pdf])
-(require-python '[jieba :as jieba])
 (require-python '[sentence_transformers :as st])
 (require-python '[faiss :as faiss])
 
-;; 1. 提取中文 PDF 文本
+;; 1. 提取 PDF 文本
 (defn extract-text-from-pdf [filepath]
   (with-open [pdf-file (pdf/open filepath)]
     (reduce str (map #(py/$a % extract_text) (.pages pdf-file)))))
 
-;; 2. 中文文本分块
+;; 2. 文本分块
 (defn chunk-text [text chunk-size]
-  (let [words (jieba/lcut text) ; 分词
-        chunks (partition-all chunk-size words) ; 按词分块
-        chunks (map #(clojure.string/join "" %) chunks)] ; 重新组合为字符串
-    chunks))
+  (->> (clojure.string/split text #"\n\n+") ; 按段落分块
+       (mapcat #(clojure.string/split % #"[。！？]")) ; 按句子分块
+       (mapcat #(partition-all chunk-size %)))) ; 按固定长度分块
 
-;; 3. 生成嵌入向量
+;; 3. 生成 embedding
 (def model (st/SentenceTransformer "paraphrase-multilingual-MiniLM-L12-v2"))
 (defn generate-embeddings [text-chunks]
   (py/$a model encode text-chunks))
@@ -33,11 +31,15 @@
 (defn create-faiss-index [dimension]
   (faiss/IndexFlatL2 dimension))
 
-;; 5. 检索最相似的文本块
+;; 5. 添加 embedding 到索引
+(defn add-embeddings-to-index [index embeddings]
+  (py/$a index add embeddings))
+
+;; 6. 检索最相似的文本块
 (defn search-similar [index query-embedding k]
   (py/$a index search query-embedding k))
 
-;; 6. 结合 LLM 生成回答
+;; 7. 调用 LLM 生成回答
 (defn query-llm [prompt context]
   (let [response (http/post "https://api.openai.com/v1/completions"
                             {:headers {"Authorization" "Bearer YOUR_API_KEY"}
@@ -47,14 +49,20 @@
                                                    :max_tokens 150})})]
     (-> response :body (json/read-str :key-fn keyword) :choices first :text)))
 
-;; 完整 RAG 工作流
-(defn rag-pipeline [pdf-filepath user-question]
-  (let [text (extract-text-from-pdf pdf-filepath)
-        chunks (chunk-text text 300)
+;; 8. 生成最终回答
+(defn generate-final-answer [query rag-results]
+  (let [context (clojure.string/join "\n" rag-results)
+        prompt (str "根据以下上下文，回答用户的问题：\n" context "\n\n用户问题：" query)]
+    (query-llm prompt context)))
+
+;; 完整 RAG + LLM 工作流
+(defn rag-llm-pipeline [filepath query chunk-size k]
+  (let [text (extract-text-from-pdf filepath)
+        chunks (chunk-text text chunk-size)
         embeddings (generate-embeddings chunks)
         index (create-faiss-index (count (first embeddings)))]
     (add-embeddings-to-index index embeddings)
-    (let [query-embedding (first (generate-embeddings [user-question]))
-          similar-indices (search-similar index query-embedding 3)
-          relevant-chunks (map #(nth chunks %) similar-indices)]
-      (query-llm user-question (clojure.string/join "\n" relevant-chunks)))))
+    (let [query-embedding (first (generate-embeddings [query]))
+          similar-indices (search-similar index query-embedding k)
+          rag-results (map #(nth chunks %) similar-indices)]
+      (generate-final-answer query rag-results))))
