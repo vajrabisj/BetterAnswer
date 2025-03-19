@@ -1,0 +1,88 @@
+(ns example
+  (:require [libpython-clj.require :refer [require-python]]
+            [libpython-clj.python :as py]
+            [clj-http.client :as http]))
+
+;; 初始化 Python 环境
+(py/initialize!)
+
+;; 导入 Python 库
+(require-python '[pdfplumber :as pdf])
+(require-python '[sentence_transformers :as st])
+(require-python '[chromadb :as chroma])
+
+;; 1. 并行提取多个 PDF 文件的文本
+(defn extract-text-from-pdf [filepath]
+  (with-open [pdf-file (pdf/open filepath)]
+    (reduce str (map #(py/$a % extract_text) (.pages pdf-file)))))
+
+(defn extract-texts-from-pdfs [filepaths]
+  (pmap extract-text-from-pdf filepaths))
+
+;; 2. 并行分块
+(defn chunk-text [text chunk-size]
+  (->> (clojure.string/split text #"\n\n+") ; 按段落分块
+       (mapcat #(clojure.string/split % #"[。！？]")) ; 按句子分块
+       (mapcat #(partition-all chunk-size %)))) ; 按固定长度分块
+
+(defn chunk-texts [texts chunk-size]
+  (pmap #(chunk-text % chunk-size) texts))
+
+;; 3. 并行向量化
+(def model (st/SentenceTransformer "paraphrase-multilingual-MiniLM-L12-v2"))
+
+(defn generate-embeddings [text-chunks]
+  (py/$a model encode text-chunks))
+
+(defn generate-embeddings-parallel [text-chunks-list]
+  (pmap generate-embeddings text-chunks-list))
+
+;; 4. 初始化 Chroma 客户端
+(def client (chroma/Client))
+(def collection (py/$a client :get_or_create_collection "documents"))
+
+;; 5. 添加 embedding 到 Chroma
+(defn add-embedding-to-chroma [id text embedding]
+  (py/$a collection :add
+         {:ids [id]
+          :documents [text]
+          :embeddings [embedding]}))
+
+;; 6. 并行相似度检索
+(defn search-similar-chroma [query-embedding k]
+  (py/$a collection :query
+         {:query_embeddings [query-embedding]
+          :n_results k}))
+
+(defn search-similar-chroma-parallel [query-embeddings k]
+  (pmap #(search-similar-chroma % k) query-embeddings))
+
+;; 7. 调用 LLM 生成回答
+(defn query-llm [prompt context]
+  (let [response (http/post "https://api.openai.com/v1/completions"
+                            {:headers {"Authorization" "Bearer YOUR_API_KEY"}
+                             :content-type :json
+                             :body (json/write-str {:model "gpt-3.5-turbo"
+                                                   :prompt (str context "\n\n" prompt)
+                                                   :max_tokens 150})})]
+    (-> response :body (json/read-str :key-fn keyword) :choices first :text)))
+
+;; 8. 生成最终回答
+(defn generate-final-answer [query rag-results]
+  (let [context (clojure.string/join "\n" rag-results)
+        prompt (str "根据以下上下文，回答用户的问题：\n" context "\n\n用户问题：" query)]
+    (query-llm prompt context)))
+
+;; 完整并行化 RAG + LLM 工作流
+(defn rag-llm-pipeline [filepaths query chunk-size k]
+  (let [texts (extract-texts-from-pdfs filepaths)
+        chunks-list (chunk-texts texts chunk-size)
+        embeddings-list (generate-embeddings-parallel chunks-list)]
+    ;; 添加 embedding 到 Chroma
+    (doseq [[id [text embedding]] (map-indexed vector (map vector (flatten chunks-list) (flatten embeddings-list)))
+      (add-embedding-to-chroma (str id) text embedding))
+    ;; 检索最相似的文本块
+    (let [query-embedding (first (generate-embeddings [query]))
+          results (search-similar-chroma-parallel [query-embedding] k)
+          rag-results (map :document (:documents (first results)))]
+      (generate-final-answer query rag-results))))
