@@ -1,0 +1,40 @@
+#!/usr/bin/env v run
+
+import os
+
+const pdf_dir = 'path/to/pdfs'
+const output_dir = 'vectors'
+
+fn main() {
+    os.mkdir(output_dir) or { println('Dir already exists') }
+
+    mut threads := []thread{}
+    for i in 1..51 {
+        pdf_file := '$pdf_dir/pdf-$i.pdf'
+        text_file := '$output_dir/pdf-$i.txt'
+        threads << go os.system('pdftotext $pdf_file $text_file')
+    }
+    threads.wait()
+
+    mut py_script := 'from sentence_transformers import SentenceTransformer\n'
+    py_script += 'model = SentenceTransformer(\'paraphrase-MiniLM-L6-v2\')\n'
+    py_script += 'texts = []\n'
+    for i in 1..51 {
+        py_script += 'with open(\'$output_dir/pdf-$i.txt\', \'r\') as f: texts.append(f.read())\n'
+    }
+    py_script += 'vectors = model.encode(texts, batch_size=8)\n'
+    py_script += 'for i, vector in enumerate(vectors, 1):\n'
+    py_script += '    with open(f\'$output_dir/pdf-{i}.vec\', \'w\') as f:\n'
+    py_script += '        f.write(" ".join(map(str, vector)))\n'
+
+    os.write_file('temp.py', py_script) or { panic(err) }
+    res := os.system('python3 temp.py')
+    if res != 0 {
+        println('Vectorization failed')
+        exit(1)
+    }
+    os.rm('temp.py') or {}
+
+    println('Done! Vectors are in $output_dir')
+}
+​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​
