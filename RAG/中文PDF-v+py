@@ -1,0 +1,68 @@
+#!/usr/bin/env v run
+
+import os
+
+const pdf_dir = 'path/to/pdfs'
+const output_dir = 'vectors'
+
+fn main() {
+    os.mkdir(output_dir) or { println('Dir already exists') }
+
+    // 并行提取文本
+    mut threads := []thread{}
+    for i in 1..51 {
+        pdf_file := '$pdf_dir/pdf-$i.pdf'
+        text_file := '$output_dir/pdf-$i.txt'
+        threads << go os.system('pdftotext $pdf_file $text_file')
+    }
+    threads.wait()
+
+    // V 读取文本
+    mut texts := []string{}
+    for i in 1..51 {
+        text := os.read_file('$output_dir/pdf-$i.txt') or { panic(err) }
+        texts << text
+    }
+
+    // Python 脚本只负责 encode
+    py_file := 'encode.py'
+    if !os.exists(py_file) {
+        os.write_file(py_file, '
+import sys
+from sentence_transformers import SentenceTransformer
+model = SentenceTransformer(\'paraphrase-MiniLM-L6-v2\')
+texts = sys.stdin.read().split(\'\\n---\\n\')[:-1]
+vectors = model.encode(texts, batch_size=8)
+for vector in vectors:
+    print(" ".join(map(str, vector)))
+') or { panic(err) }
+    }
+
+    // 调用 Python
+    cmd := os.Command{
+        cmd: 'python3 $py_file'
+    }
+    cmd.start() or { panic(err) }
+    for text in texts {
+        cmd.write('$text\n---\n') or { panic(err) }
+    }
+    cmd.close_write()
+
+    // 接收向量
+    mut vectors := []string{}
+    for {
+        line := cmd.read_line() or { break }
+        if line.len > 0 {
+            vectors << line
+        }
+    }
+    cmd.wait() or { panic(err) }
+
+    // V 写入向量
+    for i, vector in vectors {
+        os.write_file('$output_dir/pdf-${i+1}.vec', vector) or { panic(err) }
+    }
+
+    println('Done! Vectors are in $output_dir')
+}
+​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​
