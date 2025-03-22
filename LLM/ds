@@ -1,0 +1,104 @@
+import x.json2
+import net.http
+
+struct DeepSeekMessage {
+	role    string `json:"role"`
+	content string `json:"content"`
+}
+
+struct DeepSeekRequest {
+	model    string          `json:"model"`
+	messages []DeepSeekMessage `json:"messages"`
+	stream   bool            `json:"stream"`
+}
+
+struct DeepSeekChoiceMessage {
+	role    string `json:"role"`
+	content string `json:"content"`
+}
+
+struct DeepSeekChoice {
+	index        int                 `json:"index"`
+	message      DeepSeekChoiceMessage `json:"message"`
+	finish_reason string              `json:"finish_reason"`
+}
+
+struct DeepSeekUsage {
+	prompt_tokens     int `json:"prompt_tokens"`
+	completion_tokens int `json:"completion_tokens"`
+	total_tokens    int `json:"total_tokens"`
+}
+
+struct DeepSeekResponse {
+	id      string          `json:"id"`
+	object  string          `json:"object"`
+	created int             `json:"created"`
+	model   string          `json:"model"`
+	choices []DeepSeekChoice `json:"choices"`
+    usage   DeepSeekUsage   `json:"usage"`
+}
+
+fn main() {
+	api_key := 'YOUR_DEEPSEEK_API_KEY' // Replace with your DeepSeek API key
+	url := 'https://api.deepseek.com/chat/completions'
+
+	messages := [
+		DeepSeekMessage{
+			role: 'system'
+			content: 'You are a helpful assistant.'
+		},
+		DeepSeekMessage{
+			role: 'user'
+			content: 'Hello!'
+		},
+	]
+
+	request_data := DeepSeekRequest{
+		model: 'deepseek-chat'
+		messages: messages
+		stream: false
+	}
+
+	json_data := json2.encode(request_data) or {
+		eprintln('Error encoding JSON: ${err}')
+		return
+	}
+
+	mut req := http.new_request(.post, url)
+	req.header.add('Content-Type', 'application/json')
+	req.header.add('Authorization', 'Bearer ${api_key}')
+	req.data = json_data.bytes()
+
+	resp := req.do() or {
+		eprintln('Error making HTTP request: ${err}')
+		return
+	}
+	defer {
+		resp.free()
+	}
+
+	if resp.status_code != 200 {
+		println('Error: HTTP status code ${resp.status_code}')
+		println('Response body: ${resp.text()}')
+		return
+	}
+
+	response_body := resp.text()
+
+	result := json2.decode[DeepSeekResponse](response_body) or {
+		eprintln('Error decoding JSON: ${err}')
+		println('Response body: ${response_body}')
+		return
+	}
+
+	println(result)
+
+	// Access the decoded data
+	if result.choices.len > 0 {
+		println('Response: ${result.choices[0].message.content}')
+	} else {
+		println('No choices in response.')
+	}
+
+    println('Usage: ${result.usage}')
+}

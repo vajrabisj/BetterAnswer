@@ -1,0 +1,34 @@
+#!/bin/bash
+
+PDF_DIR="path/to/pdfs"
+OUTPUT_DIR="vectors"
+mkdir -p "$OUTPUT_DIR"
+
+# 提取所有 PDF 文本
+for i in {1..50}; do
+  pdf_file="$PDF_DIR/pdf-$i.pdf"
+  text_file="$OUTPUT_DIR/pdf-$i.txt"
+  pdftotext "$pdf_file" "$text_file" &
+done
+wait
+
+# 一次性向量化
+python3 - <<EOF
+from sentence_transformers import SentenceTransformer
+import os
+
+model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+output_dir = '$OUTPUT_DIR'
+
+texts = []
+for i in range(1, 51):
+    with open(f'{output_dir}/pdf-{i}.txt', 'r') as f:
+        texts.append(f.read())
+
+vectors = model.encode(texts, batch_size=8)  # 批量处理
+for i, vector in enumerate(vectors, 1):
+    with open(f'{output_dir}/pdf-{i}.vec', 'w') as f:
+        f.write(' '.join(map(str, vector)))
+EOF
+
+echo "Done! Vectors are in $OUTPUT_DIR"
