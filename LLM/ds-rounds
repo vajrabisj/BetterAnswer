@@ -1,0 +1,121 @@
+import x.json2
+import net.http
+
+struct DeepSeekMessage {
+	role    string `json:"role"`
+	content string `json:"content"`
+}
+
+struct DeepSeekRequest {
+	model    string          `json:"model"`
+	messages []DeepSeekMessage `json:"messages"`
+	stream   bool            `json:"stream"`
+}
+
+struct DeepSeekChoiceMessage {
+	role    string `json:"role"`
+	content string `json:"content"`
+}
+
+struct DeepSeekChoice {
+	index        int                 `json:"index"`
+	message      DeepSeekChoiceMessage `json:"message"`
+	finish_reason string              `json:"finish_reason"`
+}
+
+struct DeepSeekUsage {
+	prompt_tokens     int `json:"prompt_tokens"`
+	completion_tokens int `json:"completion_tokens"`
+	total_tokens    int `json:"total_tokens"`
+}
+
+struct DeepSeekResponse {
+	id      string          `json:"id"`
+	object  string          `json:"object"`
+	created int             `json:"created"`
+	model   string          `json:"model"`
+	choices []DeepSeekChoice `json:"choices"`
+    usage   DeepSeekUsage   `json:"usage"`
+}
+
+fn main() {
+	api_key := 'YOUR_DEEPSEEK_API_KEY' // Replace with your DeepSeek API key
+	url := 'https://api.deepseek.com/chat/completions'
+
+	mut messages := []DeepSeekMessage{}
+
+	// --- Round 1 ---
+	user_message_1 := DeepSeekMessage{
+		role: 'user'
+		content: "What's the highest mountain in the world?"
+	}
+	messages << user_message_1
+
+	response_1 := chat(api_key, url, 'deepseek-chat', messages) or {
+		eprintln('Error in Round 1: ${err}')
+		return
+	}
+
+	if response_1.choices.len > 0 {
+		messages << response_1.choices[0].message  // Add assistant's message to history
+		println('Round 1 Response: ${response_1.choices[0].message.content}')
+	} else {
+		println('No choices in Round 1 response.')
+		return
+	}
+
+	// --- Round 2 ---
+	user_message_2 := DeepSeekMessage{
+		role: 'user'
+		content: "What is the second?"
+	}
+	messages << user_message_2
+
+	response_2 := chat(api_key, url, 'deepseek-chat', messages) or {
+		eprintln('Error in Round 2: ${err}')
+		return
+	}
+
+	if response_2.choices.len > 0 {
+		println('Round 2 Response: ${response_2.choices[0].message.content}')
+	} else {
+		println('No choices in Round 2 response.')
+	}
+
+}
+
+fn chat(api_key string, url string, model string, messages []DeepSeekMessage) !DeepSeekResponse {
+	request_data := DeepSeekRequest{
+		model: model
+		messages: messages
+		stream: false
+	}
+
+	json_data := json2.encode(request_data) or {
+		return error('JSON encode error: ${err}')
+	}
+
+	mut req := http.new_request(.post, url)
+	req.header.add('Content-Type', 'application/json')
+	req.header.add('Authorization', 'Bearer ${api_key}')
+	req.data = json_data.bytes()
+
+	resp := req.do() or {
+		return error('HTTP request error: ${err}')
+	}
+	defer {
+		resp.free()
+	}
+
+	if resp.status_code != 200 {
+		return error('HTTP status code ${resp.status_code}, body: ${resp.text()}')
+	}
+
+	response_body := resp.text()
+
+	result := json2.decode[DeepSeekResponse](response_body) or {
+		return error('JSON decode error: ${err}, body: ${response_body}')
+	}
+
+	return result
+}
