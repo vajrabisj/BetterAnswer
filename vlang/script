@@ -1,0 +1,13 @@
+import sys
+
+# 从命令行参数获取数据
+if len(sys.argv) > 1:
+    data_from_v = sys.argv[1]
+else:
+    data_from_v = ""
+
+# 处理数据
+processed_data = f"Python received: {data_from_v}"
+
+# 将数据写入标准输出
+sys.stdout.write(processed_data)

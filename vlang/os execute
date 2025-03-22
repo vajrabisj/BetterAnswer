@@ -1,0 +1,24 @@
+import os
+
+fn main() {
+    // Python 脚本的路径
+    python_script := "script.py"
+
+    // 要传递给 Python 脚本的数据
+    data_to_python := "Hello from V!"
+
+    // 构建命令，将数据作为参数传递给 Python 脚本
+    cmd := "python3 \(python_script) \"\(data_to_python)\""
+
+    // 执行命令并获取结果
+    result := os.execute(cmd)
+
+    // 检查命令是否成功执行
+    if result.exit_code != 0 {
+        println("Error executing Python script: \(result.output)")
+        return
+    }
+
+    // 打印从 Python 脚本接收到的数据
+    println("Received from Python: \(result.output)")
+}
