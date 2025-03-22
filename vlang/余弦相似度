@@ -1,0 +1,29 @@
+import vtl
+import math
+
+// 计算余弦相似度
+fn cosine_similarity[T](v1 &vtl.Tensor[T], v2 &vtl.Tensor[T]) !f64 {
+	dot_product := vtl.la.dot(v1, v2)!.f64() // 计算点积
+	norm_v1 := v1.norm()!.f64() // 计算 v1 的模
+	norm_v2 := v2.norm()!.f64() // 计算 v2 的模
+
+	if norm_v1 == 0.0 || norm_v2 == 0.0 {
+		return 0.0 // 避免除以零的情况
+	}
+
+	return dot_product / (norm_v1 * norm_v2)
+}
+
+fn main() {
+	// 示例向量
+	v1_data := [1.0, 2.0, 3.0]
+	v2_data := [4.0, 5.0, 6.0]
+
+	// 将数据转换为 VTL Tensor
+	v1 := vtl.from_array(v1_data, [v1_data.len])!
+	v2 := vtl.from_array(v2_data, [v2_data.len])!
+
+	// 计算余弦相似度
+	similarity := cosine_similarity(v1, v2)!
+	println('余弦相似度: ${similarity}')
+}

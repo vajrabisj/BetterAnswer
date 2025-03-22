@@ -1,0 +1,38 @@
+import numpy as np
+from gensim.models import Word2Vec
+from sklearn.metrics.pairwise import cosine_similarity
+
+# 假设的命令列表
+commands = ["打开浏览器", "关闭浏览器"]
+
+# 构建 Word2Vec 模型
+sentences = [command.split() for command in commands]
+model = Word2Vec(sentences, vector_size=100, min_count=1)
+
+# 将命令转化为向量
+command_vectors = {}
+for command in commands:
+    words = command.split()
+    vector = np.mean([model.wv[word] for word in words], axis=0)
+    command_vectors[command] = vector
+
+# 用户输入
+input_text = "打开浏览器"
+
+# 将输入转化为向量
+input_words = input_text.split()
+input_vector = np.mean([model.wv[word] for word in input_words], axis=0)
+
+# 找到最相似的命令
+best_match = None
+max_similarity = -1.0
+for command, vector in command_vectors.items():
+    similarity = cosine_similarity([input_vector], [vector])[0][0]
+    if similarity > max_similarity:
+        max_similarity = similarity
+        best_match = command
+
+if best_match:
+    print(f"执行命令：{best_match}")
+else:
+    print("未找到匹配的命令")

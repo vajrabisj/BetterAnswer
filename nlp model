@@ -1,0 +1,111 @@
+import vsl.ml.nlp as nlp
+import vtl
+import os
+
+// 预定义的命令和对应的文本
+struct CommandText {
+	command string
+	text    string
+}
+
+fn main() {
+	// 1. 定义命令和文本
+	command_texts := [
+		CommandText{
+			command: "打开浏览器"
+			text:    "打开 浏览器"
+		},
+		CommandText{
+			command: "关闭浏览器"
+			text:    "关闭 浏览器"
+		},
+	]
+
+	// 2. 获取用户输入
+	input_text := ask_user_for_input("请输入命令: ")
+
+	// 3. 文本预处理 (包括 tokenize, remove_stopwords)
+	tokens := nlp.tokenize(input_text)
+	stopwords := ["的", "了", "是", "在", "这"] // 示例停用词
+	filtered_tokens := nlp.remove_stopwords(tokens, stopwords, true)
+
+	// 4. 生成 N-grams (这里使用 unigrams)
+	ngrams_input := nlp.ngrams(filtered_tokens, 1) or { []string{} }
+
+	// 5. 构建词袋模型（Bag-of-Words）向量
+	// 首先提取所有命令文本的 N-grams
+	mut all_ngrams := [][]string{}
+	for ct in command_texts {
+		tokens_ct := nlp.tokenize(ct.text)
+		filtered_tokens_ct := nlp.remove_stopwords(tokens_ct, stopwords, true)
+		ngrams_ct := nlp.ngrams(filtered_tokens_ct, 1) or { []string{} }
+		all_ngrams << ngrams_ct
+	}
+
+	// 计算最频繁的 N-grams
+	most_frequent := nlp.most_frequent_ngrams(all_ngrams.flatten(), 0) or { [][]string{} }
+
+	// 使用count_vectorize构建向量
+	input_vector := nlp.count_vectorize(ngrams_input, most_frequent)
+
+	// 创建命令文本的向量
+	command_vectors := map[string][]int{}
+	for ct in command_texts {
+		tokens_ct := nlp.tokenize(ct.text)
+		filtered_tokens_ct := nlp.remove_stopwords(tokens_ct, stopwords, true)
+		ngrams_ct := nlp.ngrams(filtered_tokens_ct, 1) or { []string{} }
+		command_vectors[ct.command] = nlp.count_vectorize(ngrams_ct, most_frequent)
+	}
+
+	// 6. 计算相似度 (这里简化为计算向量点积)
+	best_match := ""
+	max_similarity := -1
+
+	for command, vector in command_vectors {
+		similarity := dot_product(input_vector, vector)
+		if similarity > max_similarity {
+			max_similarity = similarity
+			best_match = command
+		}
+	}
+
+	// 7. 执行命令
+	if best_match != "" {
+		println("执行命令: " + best_match)
+		execute_command(best_match)
+	} else {
+		println("未找到匹配的命令")
+	}
+}
+
+// 获取用户输入
+fn ask_user_for_input(prompt string) string {
+	println(prompt)
+	mut input := ""
+	os.read_line(&input)
+	return input.trim_space()
+}
+
+// 计算向量点积
+fn dot_product(v1 []int, v2 []int) int {
+	mut result := 0
+	for i, val in v1 {
+		if i < v2.len {
+			result += val * v2[i]
+		}
+	}
+	return result
+}
+
+// 执行命令 (这里只是一个示例，实际中需要根据命令进行不同的操作)
+fn execute_command(command string) {
+	if command == "打开浏览器" {
+		println("正在打开浏览器...")
+		// 在这里添加打开浏览器的代码
+	} else if command == "关闭浏览器" {
+		println("正在关闭浏览器...")
+		// 在这里添加关闭浏览器的代码
+	} else {
+		println("未知的命令")
+	}
+}

@@ -1,0 +1,138 @@
+import vsl.ml.nlp as nlp
+import json
+import os
+
+// CommandText 结构体
+struct CommandText {
+    command string
+    text    string
+}
+
+// 向量库结构体
+struct VectorLibrary {
+    ngrams  []string        // 预计算的最频繁N-grams
+    vectors map[string][]int // 命令到向量的映射
+}
+
+// 保存向量库到文件
+fn save_vector_library(lib VectorLibrary, filename string) {
+    json_data := json.encode(lib)
+    os.write_file(filename, json_data) or { panic("无法保存向量库: $err") }
+}
+
+// 从文件加载向量库
+fn load_vector_library(filename string) ?VectorLibrary {
+    if !os.exists(filename) {
+        return error("向量库文件不存在")
+    }
+    json_data := os.read_file(filename) or { return error("无法读取向量库: $err") }
+    return json.decode(VectorLibrary, json_data) or { return error("解码向量库失败: $err") }
+}
+
+// 生成向量库
+fn generate_vector_library(command_texts []CommandText, stopwords []string) VectorLibrary {
+    mut all_ngrams := [][]string{}
+    for ct in command_texts {
+        tokens := nlp.tokenize(ct.text)
+        filtered := nlp.remove_stopwords(tokens, stopwords, true)
+        ngrams := nlp.ngrams(filtered, 1) or { []string{} }
+        all_ngrams << ngrams
+    }
+    most_frequent := nlp.most_frequent_ngrams(all_ngrams.flatten(), 0) or { []string{} }
+
+    mut vectors := map[string][]int{}
+    for ct in command_texts {
+        tokens := nlp.tokenize(ct.text)
+        filtered := nlp.remove_stopwords(tokens, stopwords, true)
+        ngrams := nlp.ngrams(filtered, 1) or { []string{} }
+        vectors[ct.command] = nlp.count_vectorize(ngrams, most_frequent)
+    }
+    return VectorLibrary{
+        ngrams: most_frequent
+        vectors: vectors
+    }
+}
+
+// 计算向量点积
+fn dot_product(v1 []int, v2 []int) int {
+    mut result := 0
+    for i, val in v1 {
+        if i < v2.len {
+            result += val * v2[i]
+        }
+    }
+    return result
+}
+
+// 获取用户输入
+fn ask_user_for_input(prompt string) string {
+    println(prompt)
+    mut input := ""
+    os.read_line(&input)
+    return input.trim_space()
+}
+
+// 执行命令
+fn execute_command(command string) {
+    if command == "打开浏览器" {
+        println("正在打开浏览器...")
+    } else if command == "关闭浏览器" {
+        println("正在关闭浏览器...")
+    } else {
+        println("未知的命令")
+    }
+}
+
+fn main() {
+    // 定义命令
+    command_texts := [
+        CommandText{command: "打开浏览器", text: "打开 浏览器"},
+        CommandText{command: "关闭浏览器", text: "关闭 浏览器"},
+    ]
+    stopwords := ["的", "了", "是", "在", "这"]
+
+    // 向量库文件路径
+    vector_lib_file := "command_vectors.json"
+
+    // 检查是否已存在向量库，若不存在则生成并保存
+    mut vector_lib := VectorLibrary{}
+    if !os.exists(vector_lib_file) {
+        println("生成新的向量库...")
+        vector_lib = generate_vector_library(command_texts, stopwords)
+        save_vector_library(vector_lib, vector_lib_file)
+    } else {
+        vector_lib = load_vector_library(vector_lib_file) or {
+            println("加载向量库失败: $err")
+            return
+        }
+    }
+
+    // 获取用户输入并处理
+    input_text := ask_user_for_input("请输入命令: ")
+    tokens := nlp.tokenize(input_text)
+    filtered_tokens := nlp.remove_stopwords(tokens, stopwords, true)
+    ngrams_input := nlp.ngrams(filtered_tokens, 1) or {
+        println("无法处理输入")
+        return
+    }
+    input_vector := nlp.count_vectorize(ngrams_input, vector_lib.ngrams)
+
+    // 检索最佳匹配
+    best_match := ""
+    max_similarity := -1
+    for command, vector in vector_lib.vectors {
+        similarity := dot_product(input_vector, vector)
+        if similarity > max_similarity {
+            max_similarity = similarity
+            best_match = command
+        }
+    }
+
+    // 执行命令
+    if best_match != "" {
+        println("执行命令: " + best_match)
+        execute_command(best_match)
+    } else {
+        println("未找到匹配的命令")
+    }
+}
