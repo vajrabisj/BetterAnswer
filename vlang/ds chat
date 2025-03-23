@@ -1,0 +1,101 @@
+import net.http
+import json
+
+fn main() {
+    // DeepSeek API 接口地址
+    url := "https://api.deepseek.com/chat/completions"
+    
+    // API Key
+    api_key := "YOUR_API_KEY"
+    
+    // 初始化会话
+    var session_id string = ""
+    var conversation_context []map[string]string = []
+    
+    // 准备初始请求数据
+    data := {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant"},
+            {"role": "user", "content": "Hello"},
+        ],
+        "stream": false
+    }
+    
+    // 将数据转换为 JSON 字符串
+    body := json.encode(data)
+    
+    // 设置请求头
+    headers := {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + api_key
+    }
+    
+    // 发送初始请求
+    resp := fetch(url, {
+        method: "POST",
+        body: body,
+        headers: headers
+    })
+    
+    // 处理初始响应
+    if resp.status == 200 {
+        println(resp.body)
+        // 获取会话 ID 或上下文信息
+        session_id = get_session_id_from_response(resp.body)
+        conversation_context = append(conversation_context, data.messages...)
+    } else {
+        println("Failed to initialize conversation")
+        return
+    }
+    
+    // 进行连续对话
+    for {
+        println("Enter your message (or 'exit' to quit):")
+        input := read_line()
+        if input == "exit" {
+            break
+        }
+        
+        // 更新对话上下文
+        conversation_context = append(conversation_context, {"role": "user", "content": input})
+        
+        // 准备请求数据
+        data = {
+            "model": "deepseek-chat",
+            "messages": conversation_context,
+            "stream": false
+        }
+        
+        // 将数据转换为 JSON 字符串
+        body = json.encode(data)
+        
+        // 发送请求
+        resp = fetch(url, {
+            method: "POST",
+            body: body,
+            headers: headers
+        })
+        
+        // 处理响应
+        if resp.status == 200 {
+            println(resp.body)
+            // 更新会话状态
+            conversation_context = append(conversation_context, get_response_message_from_response(resp.body))
+        } else {
+            println("Failed to continue conversation")
+            break
+        }
+    }
+}
+
+// 示例函数，实际实现可能不同
+fn get_session_id_from_response(body string) string {
+    // 解析响应获取会话 ID
+    // ...
+}
+
+fn get_response_message_from_response(body string) map[string]string {
+    // 解析响应获取模型的回复消息
+    // ...
+}
