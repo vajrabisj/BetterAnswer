@@ -1,0 +1,47 @@
+#!/usr/bin/env bb
+
+(require '[babashka.http-client :as http])
+(require '[cheshire.core :as json])
+
+;; DeepSeek API 配置
+(def api-key "YOUR_API_KEY_HERE") ;; 替换为你的 DeepSeek API Key
+(def api-url "https://api.deepseek.com/v1/chat/completions")
+(def model "deepseek-chat") ;; 使用 DeepSeek 的默认聊天模型（V3）
+
+;; 发送请求到 DeepSeek API 的函数
+(defn chat-with-deepseek [message]
+  (let [headers {"Content-Type" "application/json"
+                 "Authorization" (str "Bearer " api-key)}
+        body (json/generate-string
+              {:model model
+               :messages [{:role "user" :content message}]
+               :max_tokens 512
+               :temperature 0.7})
+        response (http/post api-url
+                           {:headers headers
+                            :body body})]
+    (-> response
+        :body
+        (json/parse-string true)
+        :choices
+        first
+        :message
+        :content)))
+
+;; 主循环：读取用户输入并与 DeepSeek 聊天
+(defn main []
+  (println "欢迎与 DeepSeek 聊天！输入 'exit' 退出。")
+  (loop []
+    (print "你: ")
+    (flush)
+    (let [input (read-line)]
+      (when-not (= input "exit")
+        (try
+          (let [reply (chat-with-deepseek input)]
+            (println "DeepSeek:" reply))
+          (catch Exception e
+            (println "出错了:" (.getMessage e)))
+          (recur)))))
+
+;; 启动程序
+(main)
