@@ -1,0 +1,22 @@
+;; 你的 schema 示例
+(def base-schema
+  [:map
+   [:name :string]
+   [:description :string]
+   [:address [:map
+              [:street :string]
+              [:country [:enum "finland" "poland"]]]]])
+
+;; 转换为 map
+(def schema-map (mg/generate base-schema))
+(println "初始 map:" schema-map)
+
+;; 赋值新数据
+(def updated-map (assoc schema-map
+                       :name "Alice"
+                       :description "A person"
+                       :address {:street "Main St" :country "finland"}))
+(println "更新后的 map:" updated-map)
+
+;; 后续操作
+(println "验证:" (m/validate base-schema updated-map))
