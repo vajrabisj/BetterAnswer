@@ -1,0 +1,62 @@
+; 导入必要的 Clojure 和 Python 库
+(ns buddha-vectorization
+  (:require [tech.v3.dataset :as ds]          ; 数据处理
+            [libpython-clj.python :as py]     ; 调用 Python
+            [libpython-clj.require :refer [require-python]])) ; 导入 Python 模块
+
+; 初始化 Python 环境并导入所需模块
+(py/initialize!)
+(require-python '[jieba :as jieba])                   ; 中文分词工具
+(require-python '[sklearn.feature_extraction.text :as sklearn-text]) ; scikit-learn 的 TF-IDF
+
+; 示例佛经文本（《心经》片段），按句子或段落划分
+(def buddha-texts
+  ["观自在菩萨，行深般若波罗蜜多时，照见五蕴皆空。"
+   "度一切苦厄，舍利子，色不异空，空不异色。"
+   "色即是空，空即是色，受想行识，亦复如是。"])
+
+; 第一步：分词处理
+; 使用 jieba 对文本进行分词，返回分词后的字符串列表
+(defn segment-text [text]
+  (let [words (py/call jieba :cut text)]  ; 调用 jieba 的 cut 方法
+    (clojure.string/join " " words)))     ; 将分词结果用空格连接成字符串
+
+(def segmented-texts
+  (map segment-text buddha-texts))
+
+; 打印分词结果，检查是否正确
+(println "分词后的文本：")
+(doseq [text segmented-texts] (println text))
+
+; 第二步：创建 TF-IDF 向量化器
+; 初始化 scikit-learn 的 TfidfVectorizer
+(def vectorizer
+  (sklearn-text/TfidfVectorizer :norm "l2"    ; 标准化向量
+                                :use_idf true ; 使用 IDF
+                                :smooth_idf true)) ; 平滑 IDF，避免除零
+
+; 第三步：生成 TF-IDF 向量
+; 调用 vectorizer 的 fit_transform 方法，将分词后的文本转为向量
+(def tfidf-matrix
+  (py/call vectorizer :fit_transform segmented-texts))
+
+; 获取词汇表（特征名称，即所有独特词）
+(def vocabulary
+  (py/call vectorizer :get_feature_names_out))
+
+; 将稀疏矩阵转为稠密矩阵（便于查看），实际中可保持稀疏格式
+(def tfidf-dense
+  (py/call tfidf-matrix :toarray))
+
+; 第四步：将结果转为 Clojure 数据结构并展示
+; 将 TF-IDF 矩阵转为 tech.ml.dataset 数据集，方便处理
+(def tfidf-dataset
+  (ds/->dataset (vec tfidf-dense) ; 转为向量
+                {:column-names (vec vocabulary)})) ; 用词汇表作为列名
+
+; 打印数据集的前几行
+(println "\nTF-IDF 向量数据集：")
+(ds/print-dataset tfidf-dataset {:num-rows 3})
+
+; 可选：将结果导出为 CSV 文件
+; (ds/write! tfidf-dataset "tfidf_output.csv")

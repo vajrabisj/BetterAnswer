@@ -1,0 +1,104 @@
+(ns stress-test
+  (:require [babashka.http-server :as server]
+            [malli.core :as m]
+            [malli.generator :as mg]
+            [mulog.core :as log]
+            [mulog.publisher :as pub]
+            [clojure.string :as str]
+            [huff.core :as huff]))
+
+;; Schema 定义和数据生成
+(def StressTestParams
+  [:map
+   [:user-id :int]
+   [:request-count [:int {:min 1 :max 1000}]]])
+
+(defn generate-test-data
+  "生成单条测试数据"
+  []
+  (mg/generate StressTestParams))
+
+(defn generate-test-data-batch
+  "生成多条测试数据"
+  [n]
+  (repeatedly n #(mg/generate StressTestParams)))
+
+(defn generate-curl-commands
+  "生成 curl 命令列表用于外部测试"
+  [n]
+  (map (fn [data]
+         (str "curl \"http://localhost:8080/stress-test?user-id="
+              (:user-id data)
+              "&request-count="
+              (:request-count data)
+              "\""))
+       (generate-test-data-batch n)))
+
+;; 服务端处理函数，使用 huff 生成 HTML
+(defn handle-stress-test
+  "处理压力测试请求并返回 HTML"
+  [req]
+  (let [params (:query-params req)
+        user-id (Long/parseLong (get params "user-id" "0"))
+        request-count (Long/parseLong (get params "request-count" "0"))]
+    (log/log ::stress-test
+             :user-id user-id
+             :request-count request-count
+             :timestamp (System/currentTimeMillis))
+    {:status 200
+     :headers {"Content-Type" "text/html"}
+     :body (huff/html
+            [:html
+             [:head [:title "Stress Test Result"]]
+             [:body
+              [:h1 "Stress Test Processed"]
+              [:p "User ID: " user-id]
+              [:p "Request Count: " request-count]]])}))
+
+;; 日志初始化
+(defn init-logging
+  "初始化mulog日志配置"
+  []
+  (log/set-global-context! {:app-name "stress-test-app"})
+  (pub/start-publisher!
+   {:type :files
+    :filename "test-results/stress-test-logs.json"}))
+
+;; 服务器配置
+(def server-config
+  {:port 8080
+   :handler (fn [req]
+              (case (:uri req)
+                "/stress-test" (handle-stress-test req)
+                {:status 404 :body (huff/html [:h1 "404 Not Found"])}))})
+
+;; 主程序
+(defn -main
+  "启动应用"
+  [& args]
+  (init-logging)
+  (log/log ::app-start :message "Starting stress test app")
+  (println "Starting server on http://localhost:8080...")
+  (server/start-server! server-config))
+
+;; REPL测试用例
+(comment
+  ;; 生成单条测试数据
+  (generate-test-data)
+  ;; => {:user-id 123, :request-count 456}
+
+  ;; 生成批量测试数据
+  (generate-test-data-batch 3)
+  ;; => ({:user-id 789, :request-count 234} ...)
+
+  ;; 直接调用服务端函数
+  (handle-stress-test {:query-params {"user-id" "123" "request-count" "456"}})
+
+  ;; 生成curl命令
+  (doseq [cmd (generate-curl-commands 5)]
+    (println cmd))
+
+  ;; 运行压力测试（直接调用handler模拟）
+  (doseq [test-data (generate-test-data-batch 10)]
+    (handle-stress-test {:query-params {"user-id" (str (:user-id test-data))
+                                       "request-count" (str (:request-count test-data))}})))

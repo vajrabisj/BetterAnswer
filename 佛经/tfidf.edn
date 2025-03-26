@@ -1,0 +1,3 @@
+{:deps {tech.ml.dataset {:mvn/version "7.026"}
+        scicloj/scicloj.ml {:mvn/version "0.3"}
+        libpython-clj {:mvn/version "2.025"}}}
